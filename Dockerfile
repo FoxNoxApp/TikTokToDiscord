@@ -1,4 +1,4 @@
-# Dockerfile
+# filename: Dockerfile
 
 FROM oven/bun:1 AS release
 WORKDIR /usr/src/app
@@ -34,30 +34,35 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
   && rm -rf /var/lib/apt/lists/*
 
-# Ensure bun user owns the workspace to avoid EACCES on node_modules
-RUN chown -R bun:bun /usr/src/app
+# Ensure bun user owns the workspace to avoid EACCES
+RUN mkdir -p /usr/src/app/log && chown -R bun:bun /usr/src/app
 
 # 2) Switch to bun for app deps and browser install
 USER bun
 
-# Copy app files and install deps (puppeteer)
+# Copy app manifest and install deps
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
-COPY . .
 
-# Create logs dir (in case your app writes there)
-RUN mkdir -p /usr/src/app/log
+# Copy the rest of the app
+COPY . .
 
 # 3) Install Chrome managed by Puppeteer into bun user's cache
 ENV PUPPETEER_PRODUCT=chrome
 ENV PUPPETEER_CACHE_DIR=/home/bun/.cache/puppeteer
 RUN bunx puppeteer browsers install chrome@stable
 
-# 4) Verify Chrome exists; fail build if not
+# 4) Resolve Chrome path and set envs for runtime
+# Also set a writable log path
+ENV LOG_PATH=/usr/src/app/log/posts.json
 RUN set -eux; \
   CHROME_PATH=$(find /home/bun/.cache/puppeteer -type f -path "*chrome/linux-*/chrome-linux64/chrome" | head -n1); \
   echo "Resolved CHROME_PATH=${CHROME_PATH}"; \
-  test -x "$CHROME_PATH"
+  test -x "$CHROME_PATH"; \
+  printf "%s\n" "CHROME_PATH=${CHROME_PATH}" >> /home/bun/.chromepath
 
-# Run the app
+# Load CHROME_PATH at runtime
+ENV CHROME_PATH_FILE=/home/bun/.chromepath
+
+# 5) Default command
 ENTRYPOINT [ "bun", "run", "index.js" ]
